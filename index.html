@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flood Aid Map</title>
+    <title>Flood Aid Map & Tracker</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <!-- Tailwind CSS for styling -->
@@ -12,32 +12,161 @@
         #map { height: calc(100vh - 4rem); }
     </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gray-100 flex flex-col h-screen">
 
     <!-- Header -->
-    <header class="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center">
-        <h1 class="text-xl font-bold">Flood Aid & Resources Map</h1>
-        <span class="text-sm bg-blue-700 px-3 py-1 rounded">Live Status</span>
+    <header class="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center h-16">
+        <h1 class="text-xl font-bold">Flood Aid & Resources Tracker</h1>
+        <span class="text-sm bg-blue-700 px-3 py-1 rounded">Interactive Mode</span>
     </header>
 
-    <!-- Map Container -->
-    <div id="map"></div>
+    <div class="flex flex-1 relative overflow-hidden">
+        <!-- Sidebar Controls -->
+        <aside class="w-80 bg-white shadow-md p-4 flex flex-col gap-4 z-10 overflow-y-auto">
+            <h2 class="text-lg font-semibold text-gray-800">Aid Management</h2>
+            
+            <!-- Search Bar -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Search Location</label>
+                <input type="text" id="searchInput" placeholder="Search by name..." 
+                    class="w-full p-2 border rounded border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    oninput="filterMarkers()">
+            </div>
+
+            <hr>
+
+            <!-- Add Marker Form -->
+            <form id="addForm" onsubmit="addNewMarker(event)" class="flex flex-col gap-3">
+                <h3 class="font-medium text-gray-700">Add New Station</h3>
+                <div>
+                    <label class="block text-xs text-gray-600">Station Name</label>
+                    <input type="text" id="stationName" required placeholder="e.g. Relief Camp B" 
+                        class="w-full p-2 border rounded border-gray-300 text-sm">
+                </div>
+                <div class="flex gap-2">
+                    <div class="w-1/2">
+                        <label class="block text-xs text-gray-600">Latitude</label>
+                        <input type="number" step="any" id="stationLat" required placeholder="25.20" 
+                            class="w-full p-2 border rounded border-gray-300 text-sm">
+                    </div>
+                    <div class="w-1/2">
+                        <label class="block text-xs text-gray-600">Longitude</label>
+                        <input type="number" step="any" id="stationLng" required placeholder="55.27" 
+                            class="w-full p-2 border rounded border-gray-300 text-sm">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-600">Initial Status</label>
+                    <select id="stationStatus" class="w-full p-2 border rounded border-gray-300 text-sm">
+                        <option value="red">Not Reached (Red)</option>
+                        <option value="green">Supplies Reached (Green)</option>
+                    </select>
+                </div>
+                <button type="submit" class="bg-blue-600 text-white p-2 rounded text-sm font-medium hover:bg-blue-700 transition">
+                    Add Marker to Map
+                </button>
+            </form>
+
+            <div class="text-xs text-gray-500 mt-auto bg-gray-50 p-3 rounded">
+                💡 <strong>Tip:</strong> Click any marker on the map to toggle its status between Reached and Not Reached.
+            </div>
+        </aside>
+
+        <!-- Map Container -->
+        <main id="map" class="flex-1"></main>
+    </div>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script>
-        // Initialize the map centered somewhere (e.g., Dubai coordinates)
-        const map = L.map('map').setView([25.2048, 55.2708], 11);
+        // Initial dataset containing 5 pre-loaded stations around Dubai
+        let stations = [
+            { name: "Central Aid Station", lat: 25.2048, lng: 55.2708, status: "green" },
+            { name: "North Relief Camp", lat: 25.2550, lng: 55.3100, status: "red" },
+            { name: "Emergency Food Hub", lat: 25.1800, lng: 55.2400, status: "red" },
+            { name: "Medical Supply Post", lat: 25.2200, lng: 55.3500, status: "green" },
+            { name: "Community Shelter East", lat: 25.1500, lng: 55.3000, status: "red" }
+        ];
 
-        // Add map tiles (the visual map layer)
+        // Initialize map centered on Dubai
+        const map = L.map('map').setView([25.2048, 55.2708], 12);
+
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Add a sample marker for an aid station
-        const marker = L.marker([25.2048, 55.2708]).addTo(map);
-        marker.bindPopup("<b>Central Aid Station</b><br>Supplies available here.").openPopup();
+        let mapMarkers = [];
+
+        // Function to display markers on the map
+        function displayMarkers(filteredStations = stations) {
+            // Clear existing markers from map
+            mapMarkers.forEach(item => map.removeLayer(item.marker));
+            mapMarkers = [];
+
+            filteredStations.forEach((station, index) => {
+                // Pick color based on status
+                const color = station.status === 'green' ? '#16a34a' : '#dc2626';
+                
+                // Create a custom circle marker
+                const circleMarker = L.circleMarker([station.lat, station.lng], {
+                    radius: 10,
+                    fillColor: color,
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.9
+                }).addTo(map);
+
+                // Popup content with a toggle button
+                const popupContent = `
+                    <div style="font-family: sans-serif;">
+                        <strong>${station.name}</strong><br>
+                        Status: <span style="color: ${color}; font-weight: bold;">${station.status === 'green' ? 'Supplies Reached' : 'Not Reached'}</span><br><br>
+                        <button onclick="toggleStatus(${index})" style="background: #2563eb; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
+                            Toggle Status
+                        </button>
+                    </div>
+                `;
+
+                circleMarker.bindPopup(popupContent);
+                mapMarkers.push({ marker: circleMarker, station: station });
+            });
+        }
+
+        // Toggle status between green and red
+        function toggleStatus(index) {
+            stations[index].status = stations[index].status === 'green' ? 'red' : 'green';
+            displayMarkers();
+            // Keep popup open/updated
+            mapMarkers[index].marker.openPopup();
+        }
+
+        // Add a new marker from the form
+        function addNewMarker(e) {
+            e.preventDefault();
+            const name = document.getElementById('stationName').value;
+            const lat = parseFloat(document.getElementById('stationLat').value);
+            const lng = parseFloat(document.getElementById('stationLng').value);
+            const status = document.getElementById('stationStatus').value;
+
+            stations.push({ name, lat, lng, status });
+            displayMarkers();
+
+            // Reset form fields
+            document.getElementById('addForm').reset();
+            map.setView([lat, lng], 13);
+        }
+
+        // Search/Filter function
+        function filterMarkers() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = stations.filter(s => s.name.toLowerCase().includes(query));
+            displayMarkers(filtered);
+        }
+
+        // Initial render on load
+        displayMarkers();
     </script>
 </body>
 </html>
